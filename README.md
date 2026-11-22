@@ -9,28 +9,40 @@ those links answer multi-hop questions with a trail back to the source rows?
 train), evaluated against hand labels drawn by stratified sampling, then loaded into Neo4j
 where every answer carries a path confidence and the source `reference_number`s.
 
-> Status: the code, tests and synthetic checks are done. The **Results** section is filled
-> from the real data run and hand labels (see `notebooks/run_kaggle.ipynb`).
+> Status: code, tests and synthetic checks are done. Real-data results are pending hand labels.
 
-## Results (real data)
+## Results
 
-<!-- Fill from results/*.json and results/metrics.csv after the run. -->
-Slice: _departments_, _years_; _N_ rows, _N_ contracts, _N_ unique vendor strings.
-Blocking kept _N_ candidate pairs (reduction ratio _x_). Labeled pairs: _N_ (_N_ unsure).
+**Real data: pending.** The real run needs about 300 hand-labeled pairs (`labels/`). Its numbers
+and plots will replace this note, in the same format as the synthetic check below.
+
+### Pipeline check on synthetic data
+
+> These numbers come from synthetic data with a known answer key, labeled automatically from
+> that key. They show the pipeline works end to end. They say nothing about real contract records.
+
+Synthetic slice: 3 departments, 2022 to 2024; 3,652 rows, 2,266 contracts, 1,011 unique vendor
+strings. Blocking kept 3,284 candidate pairs (reduction ratio 0.994). 290 pairs labeled from the
+answer key, drawn by stratified sampling and weighted as in step 7 of the method.
 
 | Method | Precision (95% CI) | Recall (95% CI) | F1 |
 |---|---|---|---|
-| Exact cleaned name | | | |
-| Jaro-Winkler >= 0.92 | | | |
-| Fellegi-Sunter, P >= 0.5 | | | |
+| Exact cleaned name | 0.88 (0.84 to 0.92) | 0.89 (0.83 to 0.95) | 0.89 |
+| Jaro-Winkler >= 0.92 | 0.83 (0.77 to 0.89) | 0.99 (0.98 to 1.00) | 0.90 |
+| Fellegi-Sunter, P >= 0.5 | 0.85 (0.80 to 0.89) | 0.91 (0.85 to 0.96) | 0.88 |
 
-Average precision: Fellegi-Sunter _x_, Jaro-Winkler _x_. Calibration error (ECE): _x_.
-Share of true matches lost by blocking (NEAR stratum): _x_.
-Entities: _N_ vendors from _N_ strings; chaining audit flagged _N_ weak pairs.
+Average precision: Fellegi-Sunter 0.89, Jaro-Winkler 0.88. Calibration error (ECE) 0.13.
+Share of true matches lost by blocking: 0.06. Entities: 336 vendors from 1,011 strings; the
+chaining audit flagged 24 weak pairs inside entities.
 
-![Precision-recall](results/pr_curve.png) ![Calibration](results/reliability.png)
+<p>
+<img src="docs/figures/synthetic_pr_curve.png" alt="Precision-recall on synthetic data" width="48%">
+<img src="docs/figures/synthetic_reliability.png" alt="Calibration on synthetic data" width="42%">
+</p>
 
-Main finding in one sentence: _..._
+Reading: on this synthetic data, Fellegi-Sunter does not beat simple string matching on F1 (the
+intervals overlap). What it adds is a probability on every link and per-field weights that
+explain each decision. Its probabilities are overconfident: almost all sit near 0 or 1.
 
 ## Data
 
@@ -122,7 +134,7 @@ Queries in `queries/`:
 | 03 vendor provenance | Every raw spelling behind one vendor, its link probability and rows. |
 | 04 review queue | Accepted links with 0.5 <= P < 0.99: what a person should check first. |
 
-## Checks on synthetic data (not evidence about the real data)
+## Synthetic checks in more detail (not evidence about the real data)
 
 `src/cel/synthetic.py` writes data with the real 41-column schema and a known answer key:
 suffix, accent, `&`, typo, abbreviation and acronym variants; look-alike different companies;
@@ -176,6 +188,7 @@ src/cel/       config, data, normalize, vendors, blocking, compare, fellegi_sunt
 queries/       Cypher queries for Neo4j
 labels/        labeling guide, the sheet and its key (committed as evidence)
 notebooks/     Kaggle run
+docs/figures/  plots for the README (synthetic check until the real run)
 tests/         pytest suite
 ```
 
