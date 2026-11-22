@@ -1,0 +1,22 @@
+[project]
+name = "canada-contracts-entity-linking"
+version = "0.2.0"
+description = "Vendor entity linking with calibrated match probabilities on Canadian federal contract records, with a Neo4j graph layer."
+requires-python = ">=3.10"
+dependencies = [
+  "pandas>=2.0",
+  "numpy>=1.24",
+  "rapidfuzz>=3.6",
+  "matplotlib>=3.7",
+  "neo4j>=5.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "kuzu>=0.11"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

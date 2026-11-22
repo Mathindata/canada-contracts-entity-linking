@@ -1,0 +1,14 @@
+{
+  "raw_csv": "data/raw/contracts.csv",
+  "work_dir": "data/work",
+  "out_dir": "results",
+  "departments": [],
+  "top_n_departments": 3,
+  "year_min": 2022,
+  "year_max": 2024,
+  "dept_column": "auto",
+  "match_threshold": 0.5,
+  "jw_baseline_threshold": 0.92,
+  "label_per_stratum": 25,
+  "near_miss_label": 40
+}

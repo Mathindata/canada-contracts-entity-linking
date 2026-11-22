@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+# raw data is public but large; download it with the notebook
+data/raw/*.csv
+data/work*/
+# synthetic demo outputs
+results_synth/
+labels_synth/

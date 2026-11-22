@@ -1,0 +1,1 @@
+{"raw_csv": "data/raw/synthetic_contracts.csv", "work_dir": "data/work_synth", "out_dir": "results_synth", "top_n_departments": 3, "n_bootstrap": 300}
