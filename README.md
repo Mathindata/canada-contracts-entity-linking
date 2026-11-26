@@ -5,6 +5,10 @@
 records get a calibrated probability that it is the same vendor, and can a graph built on
 those links answer multi-hop questions with a trail back to the source rows?
 
+A second question builds on the first: **can the graph describe itself in short, graded
+sentences** ("About two thirds of the vendors with a large total value work with several
+departments", truth 0.98), and **how much do those sentences change when vendor names are linked?**
+
 **Approach.** Fellegi-Sunter record linkage written out from first principles (no labels to
 train), evaluated against hand labels drawn by stratified sampling, then loaded into Neo4j
 where every answer carries a path confidence and the source `reference_number`s.
@@ -133,6 +137,47 @@ Queries in `queries/`:
 | 02 contract early warning | Which contracts grew through amendments (count, total / original value)? With the weakest vendor link and source rows. |
 | 03 vendor provenance | Every raw spelling behind one vendor, its link probability and rows. |
 | 04 review queue | Accepted links with 0.5 <= P < 0.99: what a person should check first. |
+| 05 linguistic summary | Truth of "Most vendors with a large total value work with several departments", computed in Cypher with the fuzzy sets of step 11. |
+
+**11. Linguistic summaries (v3).** A linguistic summary is a short sentence about a whole
+table with a degree of truth in [0, 1] (Yager 1982; Kacprzyk and Yager 2001). Two forms:
+
+```
+Type I    Q objects are S          "About two thirds of the contracts were never amended."
+Type II   Q R objects are S        "Most vendors with a large total value work with several departments."
+```
+
+The pieces, step by step:
+
+- **Fuzzy sets on attributes (R and S).** Each word is a membership function mu(x) in [0, 1],
+  piecewise linear. "Contracts amended several times" is 0 at one amendment, 0.5 at two, 1 at
+  three or more. A contract can be in a set to degree 0.5. Contract value uses quantiles of
+  the slice on a log scale, so "low" and "high" adapt to the data; growth, amendments,
+  duration and vendor size use fixed break points that are easy to read. Every run writes the
+  break points it used to `results/summaries_params.json`.
+- **Proportion by sigma-counts.** A member to degree 0.4 counts as 0.4 of an object, and
+  "R and S" is min(mu_R, mu_S):
+
+  ```
+  Type I    r = (1/n) sum_i mu_S(y_i)
+  Type II   r = sum_i min(mu_R(y_i), mu_S(y_i)) / sum_i mu_R(y_i)
+  ```
+- **Quantifier (Q).** A fuzzy set on r: "most" is 0 below r = 0.3 and 1 above r = 0.8, the
+  usual choice in this literature. Seven words cover [0, 1] with overlaps (almost none, few,
+  about a third, about half, about two thirds, most, almost all). Truth is T = mu_Q(r). For each
+  (R, S) the sentence uses the word with the highest truth; on a tie, the sharper word.
+- **What gets shown.** Every (R, S) pair is computed. The shortlist keeps Type II sentences
+  with T >= 0.8 about groups of at least 10 objects, ranked by **contrast** r - r_S, where r_S
+  is the share over the whole table. A true sentence with zero contrast only repeats the base
+  rate. Pairs linked by how they are computed (growth only comes from amendments; a one-contract
+  vendor has one department) are flagged and left out of the shortlist.
+
+**Why the vendor definition matters.** Contract facts (value, amendments, dates) do not depend
+on linking. Vendor facts do: how many contracts a vendor holds, how many departments it works
+with, its total value. So every summary is computed four times, with vendors defined as raw
+strings, cleaned names, linked entities, and (synthetic data only) the answer key. The fuzzy
+sets are fitted once on the contract table, so every definition is judged with the same words.
+For each summary we compare r, and whether the sentence ends up with a different quantifier word.
 
 ## Synthetic checks in more detail (not evidence about the real data)
 
@@ -147,12 +192,46 @@ both measure string similarity, so the independence assumption double-counts som
 Dropping the token field kept the ranking (AP 0.95) but the probabilities collapsed toward 0,
 because one field could not overcome the small prior. Calibrating on labels is the next step.
 
-Tests (`pytest`, 19 tests): cleaning rules; EM recovers known m and lambda on simulated data;
+Tests (`pytest`, 26 tests): cleaning rules; EM recovers known m and lambda on simulated data;
 end-to-end quality against the answer key; the label sheet hides scores and is never
 overwritten; weights add up to the population; graph tables are consistent; and the Cypher
 files return the same answers as pandas reference code. The Cypher tests run on Kuzu, an
 embedded openCypher engine, because Neo4j cannot run in CI here; the only translation is
 Neo4j list slicing. The loader's exact UNWIND/MERGE statements are tested the same way.
+
+### Linguistic summaries on synthetic data
+
+> Synthetic data again: the attributes are drawn independently, so most groups differ little
+> from the whole table. Only the comparison between vendor definitions is informative here.
+
+`results_synth/summaries_report.md` holds the full output. Examples (vendors = linked entities):
+
+| Sentence | T | r | Whole table |
+|---|---|---|---|
+| Most vendors with a small total value work with only one department. | 1.00 | 0.94 | 0.55 |
+| About two thirds of the vendors with a large total value work with several departments. | 0.98 | 0.72 | 0.45 |
+| About two thirds of the vendors working with several departments have a large total value. | 1.00 | 0.62 | 0.39 |
+| About two thirds of the contracts were never amended. | 1.00 | 0.64 | 0.64 |
+
+Query 05 computes the second row in Cypher, with the quantifier fixed to "most": r = 0.72,
+T = mu_most(r) = 0.85. The Python step says "about two thirds" instead, because that word fits
+r better (T = 0.98). The query counts a contract for every vendor its records resolve to, so its
+r differs from the Python step only in the third decimal.
+
+Vendor definitions against the answer key, range over three generated datasets:
+
+| Vendors defined as | Mean change in r, vendor sentences | Sentences with a different word |
+|---|---|---|
+| Raw strings | 0.08 to 0.09 | 39 to 54% |
+| Cleaned names | 0.03 | 5 to 32% |
+| Linked entities | 0.03 | 11 to 30% |
+
+Reading: summaries built on raw strings are clearly wrong. Raw strings split one company into
+several small ones, so "About half of the vendors hold a single contract" (r = 0.46) is said
+where the answer key gives "Few vendors hold a single contract" (r = 0.19). Linking fixes most
+of this. On this synthetic data, though, most of the gain already comes from name cleaning:
+linked entities and cleaned names are about equally close to the truth. Real data, with
+acronyms and finance-system names, may separate them; that is the first thing to check.
 
 ## Limitations
 
@@ -162,6 +241,10 @@ Neo4j list slicing. The loader's exact UNWIND/MERGE statements are tested the sa
 - Fields are not independent, so P(match) is overconfident; path confidences multiply link
   probabilities as if independent.
 - Entities from connected components can chain; the audit flags this but does not split them.
+- Summaries use each contract's vendor with full weight. Link probabilities could weight
+  vendor counts instead (a name linked with P = 0.7 adds 0.7 of a contract); not done yet.
+- The fuzzy break points are choices. They are written to the output so they can be checked
+  and changed, but other choices give other sentences.
 
 ## Reproduce
 
@@ -177,6 +260,7 @@ python -m cel prepare && python -m cel link && python -m cel label-sheet
 python -m cel label                      # answer y / n / u, resume any time
 python -m cel evaluate && python -m cel cluster && python -m cel export-graph
 export NEO4J_URI=... NEO4J_USERNAME=neo4j NEO4J_PASSWORD=...
+python -m cel summarize                  # linguistic summaries -> results/summaries_report.md
 python -m cel load-neo4j --wipe && python -m cel run-queries
 ```
 
@@ -184,7 +268,7 @@ python -m cel load-neo4j --wipe && python -m cel run-queries
 
 ```
 src/cel/       config, data, normalize, vendors, blocking, compare, fellegi_sunter,
-               labeling, evaluate, cluster, graph, neo4j_io, synthetic, cli
+               labeling, evaluate, cluster, graph, neo4j_io, summaries, synthetic, cli
 queries/       Cypher queries for Neo4j
 labels/        labeling guide, the sheet and its key (committed as evidence)
 notebooks/     Kaggle run
@@ -195,5 +279,10 @@ tests/         pytest suite
 ## References
 
 - Fellegi, I. P., and Sunter, A. B. (1969). A theory for record linkage. *Journal of the American Statistical Association*.
+- Yager, R. R. (1982). A new approach to the summarization of data. *Information Sciences*.
+- Zadeh, L. A. (1983). A computational approach to fuzzy quantifiers in natural languages.
+  *Computers and Mathematics with Applications*.
+- Kacprzyk, J., and Yager, R. R. (2001). Linguistic summaries of data using fuzzy logic.
+  *International Journal of General Systems*.
 - Splink, probabilistic record linkage library: https://github.com/moj-analytical-services/splink
 - Data: Government of Canada, Proactive Publication, Contracts over $10,000, open.canada.ca.

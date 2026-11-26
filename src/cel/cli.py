@@ -10,6 +10,8 @@ Steps, in order:
   export-graph  node and edge CSVs for Neo4j
   load-neo4j    push the graph to Neo4j (reads NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD)
   run-queries   run queries/*.cypher against Neo4j, save CSVs
+  summarize     linguistic summaries ("Most X are Y") with truth degrees, under several
+                vendor definitions (raw strings, cleaned names, linked entities)
 
 Synthetic data (tests and demo only):
   make-synthetic   write a fake contracts.csv with a known answer key
@@ -26,7 +28,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import blocking, cluster, compare, evaluate, graph, labeling, synthetic
+from . import blocking, cluster, compare, evaluate, graph, labeling, summaries, synthetic
 from .config import Config
 from .data import load_slice
 from .fellegi_sunter import FellegiSunter
@@ -249,8 +251,63 @@ def step_load_neo4j(cfg: Config, wipe: bool) -> None:
     log.info("neo4j: %s", counts)
 
 
+def _md_table(df: pd.DataFrame) -> str:
+    cols = list(df.columns)
+    lines = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
+    for _, r in df.iterrows():
+        lines.append("| " + " | ".join(f"{x:.2f}" if isinstance(x, float) else str(x)
+                                        for x in r) + " |")
+    return "\n".join(lines)
+
+
+def step_summarize(cfg: Config, truth_csv: str | None) -> None:
+    t = graph.read_tables(cfg.work / "graph")
+    truth = pd.read_csv(truth_csv) if truth_csv else None
+    runs, params = summaries.run_definitions(t, truth)
+    by = {x.name: x for x in runs}
+    ent = by["entities"]
+    ent.contract_summaries.to_csv(cfg.out / "summaries_contracts.csv", index=False)
+    ent.vendor_summaries.to_csv(cfg.out / "summaries_vendors.csv", index=False)
+    target = "truth" if truth is not None else "entities"
+    comp = summaries.compare_definitions(runs, target)
+    comp.to_csv(cfg.out / "summaries_definitions.csv", index=False)
+    json.dump(params, open(cfg.out / "summaries_params.json", "w"), indent=2)
+
+    show = ["sentence", "truth", "r", "base_rate", "group_size"]
+    other = "raw"
+    ch = summaries.biggest_changes(runs, other, target, k=5)
+    md = ["# Linguistic summaries", "",
+          "Truth T in [0, 1]; r = share of the group with the property (sigma-counts); "
+          "base_rate = the same share over the whole table. Vendors = linked entities.", "",
+          "## Contracts: whole table (Type I)", "",
+          _md_table(ent.contract_summaries.query("type == 'I'")[show]), "",
+          "## Contracts: groups that differ from the whole (Type II, T >= 0.8)", "",
+          _md_table(summaries.top_summaries(ent.contract_summaries)[show]), "",
+          "## Vendors: whole table (Type I)", "",
+          _md_table(ent.vendor_summaries.query("type == 'I'")[show]), "",
+          "## Vendors: groups that differ from the whole (Type II, T >= 0.8)", "",
+          _md_table(summaries.top_summaries(ent.vendor_summaries, k=10)[show]), "",
+          f"## Does the vendor definition change the sentences? (compared to {target})", "",
+          _md_table(comp), "",
+          f"## Largest changes, {other} strings vs {target}", "",
+          _md_table(ch), ""]
+    (cfg.out / "summaries_report.md").write_text("\n".join(md))
+    with pd.option_context("display.width", 200, "display.max_colwidth", 100):
+        print(comp.to_string(index=False))
+    log.info("summaries -> %s", cfg.out / "summaries_report.md")
+
+
+def query_params(cfg: Config) -> dict:
+    """Break points for queries/05, taken from the same fuzzy sets as `summarize`."""
+    t = graph.read_tables(cfg.work / "graph")
+    var = {v.attribute: v for v in summaries.vendor_variables(summaries.contract_table(t))}
+    lo, hi = var["total_value"].labels[1].mf.xs
+    return {"total_lo": float(lo), "total_hi": float(hi)}
+
+
 def step_run_queries(cfg: Config, params: dict) -> None:
     from .neo4j_io import connect_from_env, run_query_files
+    params = {**params, **query_params(cfg)}
     with connect_from_env() as drv:
         run_query_files(drv, Path("queries"), cfg.out / "queries", params)
 
@@ -267,6 +324,8 @@ def main(argv=None) -> None:
     ap.add_argument("--wipe", action="store_true", help="delete all nodes before loading")
     ap.add_argument("--min-conf", type=float, default=0.5)
     ap.add_argument("--vendor-id", default="")
+    ap.add_argument("--use-truth", action="store_true",
+                    help="summarize: also use the synthetic answer key (--truth)")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     cfg = Config.load(a.config)
@@ -299,6 +358,8 @@ def main(argv=None) -> None:
         step_run_queries(cfg, {"min_conf": a.min_conf, "vendor_id": a.vendor_id,
                                "min_amendments": 2, "min_growth": 1.5,
                                "low": cfg.match_threshold, "high": 0.99})
+    elif a.step == "summarize":
+        step_summarize(cfg, a.truth if a.use_truth else None)
     else:
         ap.error(f"unknown step {a.step!r}")
 

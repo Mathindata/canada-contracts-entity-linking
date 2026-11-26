@@ -139,3 +139,18 @@ def test_loader_statements_build_full_graph(setup, tmp_path):
     assert count("MATCH (n:Vendor) RETURN count(*)") == len(t["vendors"])
     assert count("MATCH ()-[r:RESOLVES_TO]->() RETURN count(*)") == len(t["resolves_to"])
     assert count("MATCH ()-[r:SAME_AS]->() RETURN count(*)") == len(t["same_as"])
+
+
+def test_q5_linguistic_summary_matches_reference(setup):
+    """The fuzzy truth computed in Cypher equals the pandas reference."""
+    from cel import summaries
+    con, t = setup
+    var = {v.attribute: v for v in summaries.vendor_variables(summaries.contract_table(t))}
+    lo, hi = var["total_value"].labels[1].mf.xs
+    q = to_kuzu((QDIR / "05_linguistic_summary.cypher").read_text())
+    got = con.execute(q, {"total_lo": float(lo), "total_hi": float(hi)}).get_as_df().iloc[0]
+    ref = graph.ref_summary_large_total_several_depts(t, lo, hi)
+    assert int(got["n_vendors"]) == ref["n_vendors"]
+    assert abs(got["group_size"] - ref["group_size"]) < 0.01
+    assert abs(got["r"] - ref["r"]) < 1e-3
+    assert abs(got["truth_most"] - ref["truth_most"]) < 1e-3

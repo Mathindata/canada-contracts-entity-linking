@@ -12,3 +12,4 @@ python -m cel oracle-label $C --labels labels_synth
 python -m cel evaluate $C --labels labels_synth
 python -m cel cluster $C
 python -m cel export-graph $C
+python -m cel summarize $C --use-truth

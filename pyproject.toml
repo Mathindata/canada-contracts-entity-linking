@@ -1,7 +1,7 @@
 [project]
 name = "canada-contracts-entity-linking"
-version = "0.2.0"
-description = "Vendor entity linking with calibrated match probabilities on Canadian federal contract records, with a Neo4j graph layer."
+version = "0.3.0"
+description = "Vendor entity linking with calibrated match probabilities on Canadian federal contract records, with a Neo4j graph layer and fuzzy linguistic summaries."
 requires-python = ">=3.10"
 dependencies = [
   "pandas>=2.0",

@@ -107,3 +107,19 @@ def ref_amendment_risk(t: dict[str, pd.DataFrame], min_amend: int, min_growth: f
                        ) -> pd.DataFrame:
     c = t["contracts"]
     return c[(c["n_amendments"] >= min_amend) | (c["growth"] >= min_growth)].reset_index(drop=True)
+
+
+def ref_summary_large_total_several_depts(t: dict[str, pd.DataFrame], lo: float, hi: float
+                                          ) -> dict:
+    """Reference for queries/05: a contract counts for every vendor its records resolve to."""
+    rec = t["records"].merge(t["resolves_to"][["vkey", "entity_id"]], on="vkey")
+    vc = rec[["entity_id", "contract_key"]].drop_duplicates() \
+        .merge(t["contracts"][["contract_key", "department", "total_value"]], on="contract_key")
+    g = vc.groupby("entity_id")
+    total = g["total_value"].sum().to_numpy()
+    n_dept = g["department"].nunique().to_numpy()
+    mu_r = np.clip((total - lo) / (hi - lo), 0, 1)
+    mu_s = (n_dept >= 2).astype(float)
+    r = float(np.minimum(mu_r, mu_s).sum() / mu_r.sum())
+    return {"n_vendors": len(total), "group_size": float(mu_r.sum()), "r": r,
+            "truth_most": float(np.clip((r - 0.3) / 0.5, 0, 1))}
